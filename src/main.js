@@ -3,29 +3,13 @@ import './main.css';
 import GSplatStreamPrimitive from './GSplatStream/GSplatStreamPrimitive';
 import { StreamLoader } from './GSplatStream/Loader/StreamLoader';
 import { StreamingGaussianSplatParser } from './GSplatStream/Loader/StreamingGaussianSplatParser';
+import { PlyStreamParser } from './GSplatStream/Loader/PlyStreamParser';
 
-
+PlyStreamParser.sMaxProcessingTime = 16 * 60;
 // 创建 Cesium Viewer
 const viewer = new Cesium.Viewer('cesiumContainer', {
-    // 禁用不必要的 UI 控件以提升性能
-    baseLayerPicker: false,
-    vrButton: false,
-    geocoder: false,
-    homeButton: false,
-    infoBox: false,
-    sceneModePicker: false,
-    selectionIndicator: false,
-    timeline: false,
-    navigationHelpButton: false,
-    fullscreenButton: false,
-    animation: false,
-    
-    // 启用地球和默认影像图层
-    // imageryProvider 使用默认值（会加载 Bing Maps 或 OpenStreetMap）
-    // terrainProvider 使用默认值（Cesium World Terrain）
-    
-    requestRenderMode: false,
-    maximumRenderTimeChange: Infinity,
+    msaaSamples: 1,
+    requestRenderMode: true,
 });
 
 const destLongitude = 114.22940300000002;
@@ -70,6 +54,8 @@ const entity = viewer.entities.add({
 });
 
 const LOAD_MODE = 'stream';
+// const LOAD_MODE = 'tile';
+// const LOAD_MODE = 'test';
 const PLY_FILE_URL = '../assets/merged_gs.ply';
 
 if (LOAD_MODE === 'stream') {
@@ -82,7 +68,11 @@ if (LOAD_MODE === 'stream') {
                 batchSize: 128,
                 show: true,
                 debugShowBoundingVolume: false,
+                scene: viewer.scene,
             });
+            if (!viewer.scene.primitives.contains(primitive)) {
+                viewer.scene.primitives.add(primitive);
+            }
             window.primitive = primitive;
                         
             // 使用 eastNorthUpToFixedFrame 创建变换矩阵
@@ -108,15 +98,13 @@ if (LOAD_MODE === 'stream') {
                         const percentage = contentLength > 0 
                             ? Math.floor((receivedLength / contentLength) * 100) 
                             : 0;
+                        
                         const progress = parser.getProgress();
                         console.log(`Loading: ${percentage}% (${progress.processed}/${progress.total} splats)`);
                     },
                     onComplete: (url) => {
                         console.log("Stream load complete!");
-                        primitive.flushUpdates();
-                        if (!viewer.scene.primitives.contains(primitive)) {
-                            viewer.scene.primitives.add(primitive);
-                        }
+                        primitive._dirty = true;
                     },
                     onError: (error) => {
                         console.error('Stream load error:', error);
@@ -142,6 +130,17 @@ if (LOAD_MODE === 'stream') {
         loadStreamingPLY(PLY_FILE_URL);
     }
 
+} else if (LOAD_MODE === 'tile') {
+    const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(3667783);
+    viewer.scene.primitives.add(tileset);
+    viewer.zoomTo(
+        tileset,
+        new Cesium.HeadingPitchRange(
+            Cesium.Math.toRadians(0),
+            Cesium.Math.toRadians(-15),
+            200
+        )
+    )
 } else if (LOAD_MODE === 'test') {
     const primitive = new GSplatStreamPrimitive({
         totalCount: 100, // Create 100 splats for testing

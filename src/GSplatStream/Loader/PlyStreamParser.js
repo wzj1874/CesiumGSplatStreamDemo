@@ -17,6 +17,8 @@ const PlyMode = {
 };
 
 export class PlyStreamParser {
+    static sVerticesPerChunk = 10000000; // Number of vertices to process per chunk
+    static sMaxProcessingTime = 5; // Maximum processing time per chunk (ms) to avoid blocking
     constructor(onHeaderParsed, onSplatParsed, batchSize = 1000) {
       this._onHeaderParsed = onHeaderParsed;
       this._onSplatParsed = onSplatParsed;
@@ -34,20 +36,31 @@ export class PlyStreamParser {
       this._propOffsets = [];
       this._properties = [];
       this._cancelled = false;
+      
+      this._parseTimeoutId = null;
+      this._useIdleCallback = typeof requestIdleCallback !== 'undefined';
     }
 
-    processChunk(chunk) {
+    async processChunk(chunk) {
       if (this._cancelled) return;
       
       if (!this._headerParsed) {
-        this._processHeaderChunk(chunk);
+        await this._processHeaderChunk(chunk);
       } else {
-        this._processDataChunk(chunk);
+        await this._processDataChunk(chunk);
       }
     }
 
     cancel() {
       this._cancelled = true;
+      if (this._parseTimeoutId !== null) {
+        if (this._useIdleCallback) {
+          cancelIdleCallback(this._parseTimeoutId);
+        } else {
+          clearTimeout(this._parseTimeoutId);
+        }
+        this._parseTimeoutId = null;
+      }
     }
 
     isCancelled() {
@@ -228,6 +241,19 @@ export class PlyStreamParser {
 
     _parseVertices() {
       if (!this._header || !this._dataBuffer) return;
+      
+      if (this._parseTimeoutId !== null) {
+        return;
+      }
+
+      this._parseVerticesChunk();
+    }
+
+    _parseVerticesChunk() {
+      if (!this._header || !this._dataBuffer || this._cancelled) {
+        this._parseTimeoutId = null;
+        return;
+      }
 
       const payload = new DataView(
         this._dataBuffer.buffer, 
@@ -239,16 +265,16 @@ export class PlyStreamParser {
       const has = (n) => this._properties.find((p) => p.name === n) != null;
       const propIndex = (n) => this._properties.findIndex((p) => p.name === n);
 
+      const startTime = performance.now();
+      let processedInThisChunk = 0;
+
       while (this._processedVertices < vertexCount && !this._cancelled) {
         const v = this._processedVertices;
         const vOffset = v * this._vertexStride;
 
         if (vOffset + this._vertexStride > this._dataOffset) {
-          break;
-        }
-
-        if (this._cancelled) {
-          break;
+          this._parseTimeoutId = null;
+          return;
         }
 
         const ix = propIndex('x');
@@ -325,13 +351,49 @@ export class PlyStreamParser {
         }
 
         this._processedVertices++;
+        processedInThisChunk++;
 
         if (this._processedVertices % this._batchSize === 0) {
-          setTimeout(() => {
-            this._parseVertices();
-          }, 0);
+          this._scheduleNextChunk();
           return;
         }
+
+        if (processedInThisChunk >= PlyStreamParser.sVerticesPerChunk) {
+          const elapsed = performance.now() - startTime;
+          if (elapsed > PlyStreamParser.sMaxProcessingTime) {
+            this._scheduleNextChunk();
+            return;
+          }
+          processedInThisChunk = 0;
+        }
+      }
+
+      this._parseTimeoutId = null;
+    }
+
+    _scheduleNextChunk() {
+      if (this._cancelled) {
+        this._parseTimeoutId = null;
+        return;
+      }
+
+      if (this._useIdleCallback) {
+        this._parseTimeoutId = requestIdleCallback((deadline) => {
+          this._parseTimeoutId = null;
+          if (!this._cancelled && deadline.timeRemaining() > 0) {
+            this._parseVerticesChunk();
+          } else if (!this._cancelled) {
+            this._parseTimeoutId = setTimeout(() => {
+              this._parseTimeoutId = null;
+              this._parseVerticesChunk();
+            }, 0);
+          }
+        }, { timeout: 100 });
+      } else {
+        this._parseTimeoutId = setTimeout(() => {
+          this._parseTimeoutId = null;
+          this._parseVerticesChunk();
+        }, 0);
       }
     }
 

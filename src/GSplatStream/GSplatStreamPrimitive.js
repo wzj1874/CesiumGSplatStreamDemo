@@ -79,7 +79,7 @@ class GSplatStreamPrimitive {
     this.instanceCount = 0;
 
     this._pendingUpdates = new Set(); // Indices pending GPU update
-    this._autoFlushThreshold = 100; // Auto-flush when this many updates pending
+    this._autoFlushThreshold = 10000; // Auto-flush when this many updates pending
     this._frameCount = 0;
     this.flushFrameLimit = 10;
     this.flushInterval = 1000;
@@ -94,6 +94,8 @@ class GSplatStreamPrimitive {
     this.modelMatrix = Cesium.Matrix4.IDENTITY.clone();
     this._context = undefined;
     this._dirty = true;
+    this._prevViewMatrix = new Cesium.Matrix4();
+    this._scene = options.scene || undefined;
 
     if (options.totalCount !== undefined && options.totalCount > 0) {
       this.initCount(options.totalCount, options.batchSize ?? 128);
@@ -212,6 +214,13 @@ class GSplatStreamPrimitive {
     }
 
     this._pendingUpdates.add(index);
+
+    if (Cesium.defined(this._scene)) {
+      this._scene.requestRender();
+    }
+    if (this._pendingUpdates.size >= this._autoFlushThreshold && Cesium.defined(this._context)) {
+      this.flushUpdates();
+    }
   }
 
   /**
@@ -357,9 +366,13 @@ class GSplatStreamPrimitive {
       } else {
         this._updateTextures(w, h, this._context);
       }
-    this._dirty = true;
     }
     this.updatePendingWorldPositions();
+    this._dirty = true;
+    if (Cesium.defined(this._scene)) {
+      this._scene.requestRender();
+    }
+    
   }
 
   /**
@@ -698,47 +711,98 @@ class GSplatStreamPrimitive {
     if (!this._sortWorker) {
       this._sortWorker = this._createSortWorker();
       this._sortWorker.onmessage = (ev) => {
-        const newOrder = ev.data.order;
-        const oldOrder = this._orderData.buffer;
-
-        this._sortWorker.postMessage({
-          order: oldOrder
-        }, [oldOrder]);
-
-        const indices = new Uint32Array(newOrder);
+        const newOrderBuffer = ev.data.order;
         const total = this.size.x * this.size.y;
+        
+        const indices = new Uint32Array(newOrderBuffer);
         const validCount = Math.min(this._validCount, indices.length);
-
+        
+        let needsUpdate = false;
         if (!this._orderData || this._orderData.length !== total) {
           this._orderData = new Uint32Array(total);
+          needsUpdate = true;
+        } else if (validCount > 0) {
+          const checkPoints = [];
+          if (validCount > 0) checkPoints.push(0);
+          if (validCount > 1) checkPoints.push(validCount - 1);
+          if (validCount > 2) checkPoints.push(Math.floor(validCount / 2));
+          if (validCount > 10) {
+            checkPoints.push(Math.floor(validCount / 4));
+            checkPoints.push(Math.floor(validCount * 3 / 4));
+          }
+          
+          for (const idx of checkPoints) {
+            if (this._orderData[idx] !== indices[idx]) {
+              needsUpdate = true;
+              break;
+            }
+          }
+        } else {
+          needsUpdate = true;
         }
-
-        this._orderData.set(indices.subarray(0, validCount), 0);
-
-        if (validCount < total) {
-          const lastIndex = this._validCount > 0 ? this._validCount - 1 : 0;
-          this._orderData.fill(lastIndex, validCount, total);
+        
+        if (needsUpdate) {
+          if (validCount > 0) {
+            this._orderData.set(indices.subarray(0, validCount), 0);
+            
+            if (validCount < total) {
+              const lastIndex = this._validCount > 0 ? this._validCount - 1 : 0;
+              const fillSize = total - validCount;
+              
+              if (fillSize > 100000) {
+                let i = validCount;
+                const end = total;
+                while (i < end - 7) {
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                  this._orderData[i++] = lastIndex;
+                }
+                while (i < end) {
+                  this._orderData[i++] = lastIndex;
+                }
+              } else {
+                this._orderData.fill(lastIndex, validCount, total);
+              }
+            }
+          }
+          
+          if (Cesium.defined(this.splatOrder) && Cesium.defined(this._context)) {
+            this.splatOrder.copyFrom({
+              source: {
+                width: this.size.x,
+                height: this.size.y,
+                arrayBufferView: this._orderData,
+              },
+              skipColorSpaceConversion: true,
+            });
+          }
         }
-
-        if (Cesium.defined(this.splatOrder) && Cesium.defined(this._context)) {
-          this.splatOrder.copyFrom({
-            source: {
-              width: this.size.x,
-              height: this.size.y,
-              arrayBufferView: this._orderData,
-            },
-            skipColorSpaceConversion: true,
-          });
-        }
+        
+        const bufferToTransfer = this._orderData.buffer.slice(0);
+        this._sortWorker.postMessage({
+          order: bufferToTransfer
+        }, [bufferToTransfer]);
 
         const valid = Math.max(0, Math.min(this._validCount, ev.data.count | 0));
-        this.setCount(valid);
+        const oldCount = this.texParams ? this.texParams[0] : 0;
+        const countChanged = valid !== oldCount;
+        
+        if (countChanged) {
+          this.setCount(valid);
+          const newInstanceCount = Math.ceil(valid / this._batchSize);
+          if (this.instanceCount !== newInstanceCount) {
+            this.instanceCount = newInstanceCount;
+            this._dirty = true;
+          }
+        }
+        
         this._workerHasReturned = true;
         this._updateTexParams();
-
-        const newInstanceCount = Math.ceil(valid / this._batchSize);
-        this.instanceCount = newInstanceCount;
-        this._dirty = true;
       };
 
       const centers = new Float32Array(this._validCount * 3);
@@ -1302,7 +1366,7 @@ class GSplatStreamPrimitive {
     }
 
     const command = new Cesium.DrawCommand({
-      // boundingVolume: this.boundingSphere,
+      boundingVolume: this.boundingSphere,
       modelMatrix: this.modelMatrix,
       uniformMap: uniformMap,
       renderState: renderState,
@@ -1339,12 +1403,16 @@ class GSplatStreamPrimitive {
       return;
     }
 
+    if (Cesium.defined(this._drawCommand)) {
+      frameState.commandList.push(this._drawCommand);
+    }
+
     // Check pick pass
     if (frameState.passes.pick) {
       return;
     }
 
-    if (this._validCount > 0 && Cesium.defined(frameState.camera)) {
+    if (this._validCount > 0 && Cesium.defined(frameState.camera) && this._frameCount % 10 === 0) {
       const viewMatrix = frameState.camera.viewMatrix;
       if (Cesium.defined(viewMatrix)) {
         this._scheduleOrder(viewMatrix);
@@ -1360,6 +1428,12 @@ class GSplatStreamPrimitive {
     this._frameCount++;
 
     this._updateTexParams();
+    
+    if (Cesium.defined(frameState.camera) && Cesium.defined(frameState.camera.viewMatrix)) {
+      if (!this._dirty && Cesium.Matrix4.equals(frameState.camera.viewMatrix, this._prevViewMatrix)) {
+        return;
+      }
+    }
 
     if (
       Cesium.defined(this._colorData) &&
@@ -1383,8 +1457,8 @@ class GSplatStreamPrimitive {
       this._dirty = false;
     }
 
-    if (Cesium.defined(this._drawCommand)) {
-      frameState.commandList.push(this._drawCommand);
+    if (Cesium.defined(frameState.camera) && Cesium.defined(frameState.camera.viewMatrix)) {
+      Cesium.Matrix4.clone(frameState.camera.viewMatrix, this._prevViewMatrix);
     }
   }
 

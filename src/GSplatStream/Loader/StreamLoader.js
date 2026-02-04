@@ -96,12 +96,12 @@ export class StreamLoader {
 
             receivedLength += value.length;
 
-            if (contentLength > 0 && options.onProgress && !aborted) {
-              options.onProgress(receivedLength, contentLength, url, parser);
-            }
-
             if (!aborted && typeof parser.processChunk === 'function') {
               await parser.processChunk(value, receivedLength, contentLength);
+            }
+            
+            if (contentLength > 0 && options.onProgress && !aborted) {
+              options.onProgress(receivedLength, contentLength, url, parser);
             }
 
             if (!parserResolved && !aborted && parser && parser.verification()) {
