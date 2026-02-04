@@ -11,7 +11,7 @@ export class StreamingGaussianSplatParser {
     constructor() {
       this._streamParser = null;
       this._primitive = null;
-      this._chunksPerBatch = 1000;
+      this._chunksPerBatch = 10000;
       this._headerParsed = false;
       this._onHeaderParsed = null;
       this._cancelled = false;

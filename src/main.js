@@ -56,7 +56,8 @@ const entity = viewer.entities.add({
 const LOAD_MODE = 'stream';
 // const LOAD_MODE = 'tile';
 // const LOAD_MODE = 'test';
-const PLY_FILE_URL = '../assets/merged_gs.ply';
+// const PLY_FILE_URL = '../assets/merged_gs.ply';
+const PLY_FILE_URL = 'https://cc-store-dev.obs.cn-south-1.myhuaweicloud.com:443/404676969243742208/3D/model-gs-ply/merged_gs.ply';
 
 if (LOAD_MODE === 'stream') {
     async function loadStreamingPLY(url) {

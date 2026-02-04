@@ -218,9 +218,9 @@ class GSplatStreamPrimitive {
     if (Cesium.defined(this._scene)) {
       this._scene.requestRender();
     }
-    if (this._pendingUpdates.size >= this._autoFlushThreshold && Cesium.defined(this._context)) {
-      this.flushUpdates();
-    }
+    // if (this._pendingUpdates.size >= this._autoFlushThreshold && Cesium.defined(this._context)) {
+    //   this.flushUpdates();
+    // }
   }
 
   /**
