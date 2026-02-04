@@ -12,10 +12,67 @@
       padding: 0;
       overflow: hidden;
     }
+    
+    #controlPanel {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    
+    #controlPanel button {
+      padding: 10px 20px;
+      font-size: 14px;
+      font-weight: bold;
+      color: white;
+      background-color: #4CAF50;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+      min-width: 120px;
+    }
+    
+    #controlPanel button:hover {
+      background-color: #45a049;
+    }
+    
+    #controlPanel button:active {
+      background-color: #3d8b40;
+    }
+    
+    #controlPanel button.cancel {
+      background-color: #ff9800;
+    }
+    
+    #controlPanel button.cancel:hover {
+      background-color: #e68900;
+    }
+    
+    #controlPanel button.delete {
+      background-color: #f44336;
+    }
+    
+    #controlPanel button.delete:hover {
+      background-color: #da190b;
+    }
+    
+    #controlPanel button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
   </style>
 </head>
 <body>
   <div id="cesiumContainer"></div>
+  <div id="controlPanel">
+    <button id="loadBtn">加载</button>
+    <button id="cancelBtn" class="cancel" disabled>取消</button>
+    <button id="deleteBtn" class="delete" disabled>删除</button>
+  </div>
   <script type="module" src="/src/main.js"></script>
 </body>
 </html>

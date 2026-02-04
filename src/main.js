@@ -52,213 +52,165 @@ const entity = viewer.entities.add({
         pixelOffset: new Cesium.Cartesian2(0, -32)
     }
 });
-
-const LOAD_MODE = 'stream';
-// const LOAD_MODE = 'tile';
-// const LOAD_MODE = 'test';
 // const PLY_FILE_URL = '../assets/merged_gs.ply';
 const PLY_FILE_URL = 'https://cc-store-dev.obs.cn-south-1.myhuaweicloud.com:443/404676969243742208/3D/model-gs-ply/merged_gs.ply';
 
-if (LOAD_MODE === 'stream') {
-    async function loadStreamingPLY(url) {
-        try {
-            console.log("Starting stream load...");
+let currentPrimitive = null;
+let currentCancelFn = null;
+let currentParser = null;
 
-            const primitive = new GSplatStreamPrimitive({
-                totalCount: 0,
-                batchSize: 128,
-                show: true,
-                debugShowBoundingVolume: false,
-                scene: viewer.scene,
-            });
-            if (!viewer.scene.primitives.contains(primitive)) {
-                viewer.scene.primitives.add(primitive);
-            }
-            window.primitive = primitive;
-                        
-            // 使用 eastNorthUpToFixedFrame 创建变换矩阵
-            // 这个函数会根据地球表面的法线方向自动计算旋转，使模型正确贴合地球表面
-            // 返回的矩阵会将本地坐标系（东-北-上）变换到 WGS84 坐标系
-            const transformMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(
-                destPosition,
-                Cesium.Ellipsoid.WGS84
-            );
-            Cesium.Matrix4.clone(transformMatrix, primitive.modelMatrix);
-            primitive._dirty = true;
+const loadBtn = document.getElementById('loadBtn');
+const cancelBtn = document.getElementById('cancelBtn');
+const deleteBtn = document.getElementById('deleteBtn');
 
-            const parser = new StreamingGaussianSplatParser();
-            parser.setPrimitive(primitive);
+async function loadStreamingPLY(url) {
+    try {
+        if (currentPrimitive) {
+            deletePrimitive();
+        }
 
-            const loader = new StreamLoader();
+        console.log("Starting stream load...");
 
-            const result = await loader.loadStream(
-                url,
-                parser,
-                {
-                    onProgress: (receivedLength, contentLength, url, parser) => {
-                        const percentage = contentLength > 0 
-                            ? Math.floor((receivedLength / contentLength) * 100) 
-                            : 0;
-                        
-                        const progress = parser.getProgress();
-                        console.log(`Loading: ${percentage}% (${progress.processed}/${progress.total} splats)`);
-                    },
-                    onComplete: (url) => {
-                        console.log("Stream load complete!");
-                        primitive._dirty = true;
-                    },
-                    onError: (error) => {
-                        console.error('Stream load error:', error);
-                    }
+        const primitive = new GSplatStreamPrimitive({
+            totalCount: 0,
+            batchSize: 128,
+            show: true,
+            debugShowBoundingVolume: false,
+            scene: viewer.scene,
+        });
+        
+        if (!viewer.scene.primitives.contains(primitive)) {
+            viewer.scene.primitives.add(primitive);
+        }
+        
+        currentPrimitive = primitive;
+        window.primitive = primitive;
+                    
+        const transformMatrix = Cesium.Transforms.eastNorthUpToFixedFrame(
+            destPosition,
+            Cesium.Ellipsoid.WGS84
+        );
+        Cesium.Matrix4.clone(transformMatrix, primitive.modelMatrix);
+        primitive._dirty = true;
+
+        const parser = new StreamingGaussianSplatParser();
+        parser.setPrimitive(primitive);
+        currentParser = parser;
+
+        const loader = new StreamLoader();
+
+        loadBtn.disabled = true;
+        cancelBtn.disabled = false;
+        deleteBtn.disabled = false;
+
+        const result = await loader.loadStream(
+            url,
+            parser,
+            {
+                onProgress: (receivedLength, contentLength, url, parser) => {
+                    const percentage = contentLength > 0 
+                        ? Math.floor((receivedLength / contentLength) * 100) 
+                        : 0;
+                    
+                    const progress = parser.getProgress();
+                    console.log(`Loading: ${percentage}% (${progress.processed}/${progress.total} splats)`);
+                },
+                onComplete: (url) => {
+                    console.log("Stream load complete!");
+                    primitive._dirty = true;
+                    loadBtn.disabled = false;
+                    cancelBtn.disabled = true;
+                    currentCancelFn = null;
+                },
+                onError: (error) => {
+                    console.error('Stream load error:', error);
+                    // 加载出错，恢复按钮状态
+                    loadBtn.disabled = false;
+                    cancelBtn.disabled = true;
+                    currentCancelFn = null;
                 }
-            );
-
-            const progress = parser.getProgress();
-            console.log(`Header parsed, streaming data... (${progress.total} splats total)`);
-            viewer.scene.primitives.add(primitive);            
-            
-            // 存储函数到全局，方便控制
-            window.cancelLoad = result.cancel;
-            window.testPrimitive = primitive;
-            
-
-        } catch (error) {
-            console.error('Load error:', error);
-        }
-    }
-
-    window.loadStreamingPLY = () => {
-        loadStreamingPLY(PLY_FILE_URL);
-    }
-
-} else if (LOAD_MODE === 'tile') {
-    const tileset = await Cesium.Cesium3DTileset.fromIonAssetId(3667783);
-    viewer.scene.primitives.add(tileset);
-    viewer.zoomTo(
-        tileset,
-        new Cesium.HeadingPitchRange(
-            Cesium.Math.toRadians(0),
-            Cesium.Math.toRadians(-15),
-            200
-        )
-    )
-} else if (LOAD_MODE === 'test') {
-    const primitive = new GSplatStreamPrimitive({
-        totalCount: 100, // Create 100 splats for testing
-        batchSize: 128,
-        show: true,
-        debugShowBoundingVolume: false,
-    });
-
-    // Initialize
-    primitive.initCount(100, 128);
-
-    const centerLon = 116.3974;
-    const centerLat = 39.9093;
-    const centerHeight = 500.0;
-    const gridSize = 10;
-    const spacing = 0.01;
-
-    console.log("Generating test splats...");
-
-    for (let i = 0; i < 100; i++) {
-        const row = Math.floor(i / gridSize);
-        const col = i % gridSize;
-
-        const lon = centerLon + (col - gridSize / 2) * spacing;
-        const lat = centerLat + (row - gridSize / 2) * spacing;
-        const height = centerHeight + Math.sin(i * 0.1) * 50;
-
-        const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
-
-        const hue = (i / 100) * 360;
-        const r = Math.sin((hue * Math.PI) / 180) * 0.5 + 0.5;
-        const g = Math.sin(((hue + 120) * Math.PI) / 180) * 0.5 + 0.5;
-        const b = Math.sin(((hue + 240) * Math.PI) / 180) * 0.5 + 0.5;
-
-        const scaleX = 1.0 + Math.sin(i * 0.2) * 0.5;
-        const scaleY = 1.0 + Math.cos(i * 0.3) * 0.5;
-        const scaleZ = 1.0 + Math.sin(i * 0.4) * 0.5;
-
-        const angle = i * 0.1;
-        const qx = 0;
-        const qy = 0;
-        const qz = Math.sin(angle / 2);
-        const qw = Math.cos(angle / 2);
-
-        primitive.setSplatData(i, {
-            position: [position.x, position.y, position.z],
-            rotation: [qx, qy, qz, qw],
-            scale: [
-                Math.log(scaleX),
-                Math.log(scaleY),
-                Math.log(scaleZ),
-            ],
-            opacity: Math.log(0.8),
-            sh: {
-                order: 0,
-                coeffs: new Float32Array([
-                    r * 2.0 - 1.0,
-                    g * 2.0 - 1.0,
-                    b * 2.0 - 1.0,
-                ]),
-            },
-        });
-    }
-
-    console.log("Flushing updates to GPU...");
-    primitive.flushUpdates();
-
-    viewer.scene.primitives.add(primitive);
-
-    function updateStats() {
-        const stats = document.getElementById("stats");
-        if (stats) {
-            stats.innerHTML = `
-        <div>Total Splats: ${primitive.totalCount}</div>
-        <div>Valid Splats: ${primitive._validCount}</div>
-        <div>Instance Count: ${primitive.instanceCount}</div>
-        <div>Batch Size: ${primitive._batchSize}</div>
-        <div>Texture Size: ${primitive.size.x} x ${primitive.size.y}</div>
-      `;
-        }
-    }
-
-    setInterval(updateStats, 1000);
-    updateStats();
-
-    setTimeout(() => {
-        const positions = [];
-        for (let i = 0; i < 100; i++) {
-            const row = Math.floor(i / gridSize);
-            const col = i % gridSize;
-            const lon = centerLon + (col - gridSize / 2) * spacing;
-            const lat = centerLat + (row - gridSize / 2) * spacing;
-            const height = centerHeight + Math.sin(i * 0.1) * 50;
-            const pos = Cesium.Cartesian3.fromDegrees(lon, lat, height);
-            positions.push(pos.x, pos.y, pos.z);
-        }
-
-        const boundingSphere = Cesium.BoundingSphere.fromVertices(positions);
-        primitive.boundingSphere = boundingSphere;
-
-        console.log("Camera adjusting to view splats...");
-        console.log("Bounding sphere:", boundingSphere);
-        console.log("Primitive state:", {
-            validCount: primitive._validCount,
-            instanceCount: primitive.instanceCount,
-            texturesReady: Cesium.defined(primitive.splatColor) && Cesium.defined(primitive.transformA),
-            drawCommand: Cesium.defined(primitive._drawCommand)
-        });
-
-        viewer.camera.viewBoundingSphere(
-            boundingSphere,
-            new Cesium.HeadingPitchRange(0, -0.5, boundingSphere.radius * 3)
+            }
         );
 
-        console.log("Camera adjusted to view splats");
-    }, 2000);
+        const progress = parser.getProgress();
+        console.log(`Header parsed, streaming data... (${progress.total} splats total)`);
+        
+        currentCancelFn = result.cancel;
+        window.cancelLoad = result.cancel;
 
-    console.log("GSplat Stream Demo initialized!");
+    } catch (error) {
+        console.error('Load error:', error);
+        loadBtn.disabled = false;
+        cancelBtn.disabled = true;
+    }
+}
+
+function cancelLoad() {
+    if (currentCancelFn) {
+        try {
+            currentCancelFn();
+            console.log("Load cancelled");
+        } catch (error) {
+            console.error('Cancel load error:', error);
+        }
+        currentCancelFn = null;
+    }
+    
+    if (currentParser) {
+        try {
+            currentParser.cancel();
+        } catch (error) {
+            console.error('Cancel parser error:', error);
+        }
+    }
+    
+    loadBtn.disabled = false;
+    cancelBtn.disabled = true;
+}
+
+function deletePrimitive() {
+    if (currentPrimitive) {
+        try {
+            cancelLoad();
+            
+            if (viewer.scene.primitives.contains(currentPrimitive)) {
+                viewer.scene.primitives.remove(currentPrimitive);
+            }
+            
+            if (!currentPrimitive.isDestroyed()) {
+                currentPrimitive.destroy();
+            }
+            
+            console.log("Primitive deleted");
+        } catch (error) {
+            console.error('Delete primitive error:', error);
+        }
+        
+        currentPrimitive = null;
+        currentCancelFn = null;
+        currentParser = null;
+        window.primitive = null;
+        window.cancelLoad = null;
+        
+        loadBtn.disabled = false;
+        cancelBtn.disabled = true;
+        deleteBtn.disabled = true;
+    }
+}
+
+loadBtn.addEventListener('click', () => {
+    loadStreamingPLY(PLY_FILE_URL);
+});
+
+cancelBtn.addEventListener('click', () => {
+    cancelLoad();
+});
+
+deleteBtn.addEventListener('click', () => {
+    deletePrimitive();
+});
+
+if (!currentPrimitive) {
+    deleteBtn.disabled = true;
 }
 
