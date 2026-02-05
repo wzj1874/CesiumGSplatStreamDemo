@@ -21,6 +21,7 @@ const float ALPHA_THRESHOLD = 0.00392156863; // 1.0 / 255.0
 const float COV_COMPENSATION = 0.3;
 const float MAX_SPLAT_SIZE = 1024.0;
 const float MIN_LAMBDA = 0.1;
+const float LOD_LEVEL_THRESHOLD = 500.0;
 
 // Helper function to discard splat
 vec4 discardSplat() {
@@ -164,6 +165,11 @@ void main() {
     // Transform center from local space to camera space
     // splatCenter is in local space, so use modelView matrix (view * model)
     vec4 splat_cam = model_view * vec4(splatCenter, 1.0);
+
+    uint lodLevel = uint(-splat_cam.z / LOD_LEVEL_THRESHOLD) + uint(1);
+    if (instanceID % lodLevel != uint(0)) {
+        return;
+    }
     
     // Note: Cesium's official implementation does NOT use early depth culling (splat_cam.z <= 0.0)
     // It relies on clip space culling instead, which is more accurate for Cesium's coordinate system

@@ -236,6 +236,11 @@ class GSplatStreamPrimitive {
     max.x = Math.max(max.x, x);
     max.y = Math.max(max.y, y);
     max.z = Math.max(max.z, z);
+    
+    if (!Cesium.defined(this.boundingSphere)) {
+      this.boundingSphere = new Cesium.BoundingSphere();
+    }
+    Cesium.BoundingSphere.expand(this.boundingSphere, new Cesium.Cartesian3(x, y, z), this.boundingSphere);
   }
 
   /**
@@ -1360,10 +1365,6 @@ class GSplatStreamPrimitive {
     }
 
     this.instanceCount = this._validCount > 0 ? Math.ceil(this._validCount / this._batchSize) : 0;
-
-    if (!Cesium.defined(this.boundingSphere)) {
-      this.boundingSphere = Cesium.BoundingSphere.fromVertices(this._positions);
-    }
 
     const command = new Cesium.DrawCommand({
       boundingVolume: this.boundingSphere,
