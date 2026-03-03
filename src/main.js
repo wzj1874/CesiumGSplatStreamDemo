@@ -6,11 +6,16 @@ import { StreamingGaussianSplatParser } from './GSplatStream/Loader/StreamingGau
 import { PlyStreamParser } from './GSplatStream/Loader/PlyStreamParser';
 
 PlyStreamParser.sMaxProcessingTime = 16 * 60;
+
 // 创建 Cesium Viewer
-const viewer = new Cesium.Viewer('cesiumContainer', {
+let viewerOptions = {
     msaaSamples: 1,
     requestRenderMode: true,
-});
+};
+
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJjOGExMzUyMS1mOTM2LTRkODgtYjA5MS1iNDRiYTJiOTY1ODIiLCJpZCI6Mzk3MDUxLCJpYXQiOjE3NzI1MTY3Nzl9.uTCxvOJzXyuAs2PLKgFQing_f-eNm7sMhXTF8oJPYX8';
+
+const viewer = new Cesium.Viewer('cesiumContainer', viewerOptions);
 
 const destLongitude = 114.22940300000002;
 const destLatitude = 23.035746999999994;
